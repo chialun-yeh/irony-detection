@@ -58,6 +58,27 @@ def featurize(corpus):
     vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer, stop_words="english")
     X = vectorizer.fit_transform(corpus)
     X = X.toarray()
+    lemma = WordNetLemmatizer()
+    X = [lemma.lemmatize(word) for word in X]
+    return X
+
+def char_flooding(corpus):
+    tokenizer = TweetTokenizer(preserve_case=False, reduce_len=False, strip_handles=True)
+    X = [];
+    for line in corpus:
+        token = tokenizer.tokenize(line)
+        token = [word for word in token]
+        count=1
+        for i in range(1,len(word)):
+            if word[i-1]==word[i]:
+                count+=1
+                if count >= 3:
+                    X.append([100])
+                    break;
+            else :
+                count=1
+        if count < 3:
+            X.append([0])
     # print(vectorizer.get_feature_names()) # to manually check if the tokens are reasonable
     return X
 
@@ -134,8 +155,9 @@ if __name__ == "__main__":
     corpus, y = parse_dataset(DATASET_FP)
     X = featurize(corpus)
     Y = senti_featurize(corpus)
+    X2 = char_flooding(corpus)
     
-    Z = np.hstack((X,Y))
+    Z = np.hstack((X,Y,X2))
 
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     print (class_counts)
