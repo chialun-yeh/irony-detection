@@ -21,6 +21,9 @@ import logging
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from nltk.corpus import sentiwordnet as swn
+from nltk import pos_tag
+import re
+
 
 
 logging.basicConfig(level=logging.INFO)
@@ -58,8 +61,6 @@ def featurize(corpus):
     vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer, stop_words="english")
     X = vectorizer.fit_transform(corpus)
     X = X.toarray()
-    lemma = WordNetLemmatizer()
-    X = [lemma.lemmatize(word) for word in X]
     return X
 
 def char_flooding(corpus):
@@ -138,6 +139,56 @@ def senti_featurize(corpus):
         X.append([float(pos_sum), float(neg_sum), float(imbal), float(senti_avg), float(positive_gap), float(negative_gap)])
     return X
 
+def pos_feat(corpus, stop_words=True, strip_url=True):
+    '''
+    Tokenizes and creates TF-IDF BoW vectors.
+    :param corpus: A list of strings each string representing document.
+    :return: X: A sparse csr matrix of TFIDF-weigted ngram counts.
+    '''
+    #[re.sub(r'.+', ' ', c) for c in corpus]
+    #print(corpus[1])
+    tknzr = TweetTokenizer(preserve_case=False, strip_handles=True, reduce_len=True)
+    tokens = [tknzr.tokenize(c) for c in corpus]
+    
+
+    if stop_words:
+        filterd = []
+        stopWords = set(stopwords.words('english'))
+        for i in range(len(tokens)):
+            filterd.append([])            
+            for word in tokens[i]:
+                #if word not in stopWords and word != '.' and word != ',':
+                if word != '.' and word != ',' and word != '...':
+                    filterd[i].append(word)
+            filterd[i] = pos_tag(filterd[i])
+
+    tags = ['CC','CD','DT','EX','FW','IN','JJ','JJR','JJS','MD','NN','NNS','NNP','NNPS','VB','VBD','VBG','VBN','VBP','VBZ','RB','RBR','RBS','RP','WP','WDT','WRB','PDT','PRP','PRP$', 'UH','SYM','TO']
+    freq = []
+    freq3Level = []
+    counts = dict()
+    for t in tags:
+        counts[t] = 0
+    for i in range(len(filterd)):
+        freq.append([])
+        freq3Level.append([])
+        for w in filterd[i]:  
+            if w[1] in counts:
+                counts[w[1]] += 1        
+        for key, value in counts.items():
+            freq[i].append(value)
+            if value ==0:
+                freq3Level[i].append(0)
+            elif value == 1:
+                freq3Level[i].append(1)
+            else:
+                freq3Level[i].append(2)
+            counts[key] = 0
+    #percent = np.divide(freq, float(np.sum(np.asarray(freq), axis=1).T))
+    X = np.concatenate((freq,freq3Level), axis=1)
+    #X = np.concatenate((X,percent), axis=1)
+    return X
+ 
+
 
 if __name__ == "__main__":
     # Experiment settings
@@ -154,10 +205,11 @@ if __name__ == "__main__":
     # Loading dataset and featurised simple Tfidf-BoW model
     corpus, y = parse_dataset(DATASET_FP)
     X = featurize(corpus)
-    Y = senti_featurize(corpus)
+    X1 = senti_featurize(corpus)
     X2 = char_flooding(corpus)
+    X3 = pos_feat(corpus)
     
-    Z = np.hstack((X,Y,X2))
+    Z = np.hstack((X,X3))
 
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     print (class_counts)
