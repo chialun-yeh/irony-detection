@@ -48,6 +48,8 @@ def parse_dataset(fp):
                 line = line.rstrip() # remove trailing whitespace
                 label = int(line.split("\t")[1])
                 tweet = line.split("\t")[2]
+                pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
+                tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE)#remove url
                 y.append(label)
                 corpus.append(tweet)
 
@@ -81,16 +83,17 @@ def char_flooding(corpus):
         token = tokenizer.tokenize(line)
         token = [word for word in token]
         count=1
-        for i in range(1,len(word)):
-            if word[i-1]==word[i]:
-                count+=1
-                if count >= 3:
-                    X.append([1])
-                    break;
-            else :
-                count=1
-        if count < 3:
-            X.append([0])
+        flood = 0
+        for word in token:
+            for i in range(1,len(word)):
+                if word[i-1]==word[i]:
+                    count+=1
+                    if count >= 3:
+                        flood+=1
+                else :
+                    count=1
+                
+        X.append([flood]*10)
     # print(vectorizer.get_feature_names()) # to manually check if the tokens are reasonable
     return X
 
@@ -140,13 +143,6 @@ def senti_featurize(corpus):
             positive_gap = 0
             negative_gap = 0
             
-    
-        #positive_sum.append(pos_sum)
-        #negative_sum.append(neg_sum)
-        #averagesenti.append(senti_avg)
-        #imbalance.append(imbal)
-        #posgap.append(positive_gap)
-        #neggap.append(negative_gap)
         X.append([float(pos_sum), float(neg_sum), float(imbal), float(senti_avg), float(positive_gap), float(negative_gap)])
     return X
 
@@ -157,17 +153,18 @@ def pos_feat(corpus, stop_words=True, strip_url=True):
     :return: X: A sparse csr matrix of TFIDF-weigted ngram counts.
     '''
     #[re.sub(r'.+', ' ', c) for c in corpus]
-    print(corpus[1])
+    #print(corpus[1])
     tknzr = TweetTokenizer(preserve_case=False, strip_handles=True, reduce_len=True)
     tokens = [tknzr.tokenize(c) for c in corpus]
+    lemma = WordNetLemmatizer()
     
 
     if stop_words:
         filterd = []
-        stopWords = set(stopwords.words('english'))
         for i in range(len(tokens)):
-            filterd.append([])            
-            for word in tokens[i]:
+            filterd.append([])   
+            token = [word for word in tokens[i] if word not in stopwords.words('english')]
+            for word in token:
                 #if word not in stopWords and word != '.' and word != ',' and word != '...':
                 if word != '.' and word != ',' and word != '...':
                     filterd[i].append(word)
@@ -198,12 +195,41 @@ def pos_feat(corpus, stop_words=True, strip_url=True):
     X = np.concatenate((freq,freq3Level), axis=1)
     #X = np.concatenate((X,percent), axis=1)
     return X
+
+def laughing(corpus):
+    pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
+    corp1 = []
+
+    for str in corpus:
+        str1 = re.sub(pattern, '', str, flags=re.MULTILINE)
+        corp1.append(str1)
+
+
+    pat = '([aA]*[hH]+[Aa]+[Hh][HhAa]*|[Oo]?[Ll]+[Oo]+[Ll]+[OolL]*|[Rr][oO]+[Ff]+[lL]+|[Ll]+[Mm]+[Aa]+[oO]+).'
+    laughing = []
+
+    for a in corp1:
+        b= re.findall(pat,a)
+        laughing.append([len(b)]*10)
+    
+    return laughing
+
+def quotes(corpus):
+  
+    pat = '["]+'
+    quotes = []
+
+    for a in corpus:
+        b= re.findall(pat,a)
+        quotes.append([len(b)]*10)
+    
+    return quotes
  
 def punctuation(corpus):
     punc = []
     ellips = []
     punclist =[]
-    pat2 = '[(\.\.\.)]+'
+    pat2 = '[(\.\.)]+'
     
     pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
     corp1 = []
@@ -212,13 +238,12 @@ def punctuation(corpus):
         corp1.append(str1)
     
     for a in corp1:
-        #print(a)
         punc.append(a.count('!')+a.count('?'))
         ellips.append(len(re.findall(pat2,a)))
         t =[]
-        t.append(a.count('!'))
-        t.append(a.count('?'))
-        t.append(len(re.findall(pat2,a)))
+        t.append(a.count('!')*10)
+        t.append(a.count('?')*10)
+        t.append(len(re.findall(pat2,a))*10)
         punclist.append(t)
         
     #with open('punctuation.txt', 'w') as data_in:
@@ -241,7 +266,7 @@ def capitalisation(corpus):
         capitn.append(count);
         t =[]
         t.append(1 if count == 0 else 0)    
-        t.append(count)
+        t.append(count*10)
         capitt.append(t)
         
     #with open('capitalisation.txt', 'w') as data_in:
@@ -263,6 +288,7 @@ if __name__ == "__main__":
     CLF = LinearSVC() # the default, non-parameter optimized linear-kernel SVM
     #CLF = DecisionTreeClassifier(random_state=0)
     #CLF = GaussianNB()
+    #CLF = LogisticRegression()
 
     # Loading dataset and featurised simple Tfidf-BoW model
     corpus, y = parse_dataset(DATASET_FP)
@@ -272,8 +298,11 @@ if __name__ == "__main__":
     X3 = pos_feat(corpus)
     punc,ellips,X4 = punctuation(corpus)
     capitn,capit,X5 = capitalisation(corpus)
+    X6 = laughing(corpus)
+    X7 = quotes(corpus)
     
-    Z = np.hstack((X,X1,X2,X3,X4,X5))
+    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7))
+    #Z = X5
 
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     print (class_counts)
@@ -285,9 +314,15 @@ if __name__ == "__main__":
     # Modify F1-score calculation depending on the task
     if TASK.lower() == 'a':
         score = metrics.f1_score(y, predicted, pos_label=1)
+        acc = metrics.accuracy_score(y, predicted)
+        preci = metrics.precision_score(y, predicted)
+        recall = metrics.recall_score(y, predicted)
     elif TASK.lower() == 'b':
         score = metrics.f1_score(y, predicted, average="macro")
     print ("F1-score Task", TASK, score)
+    print ("Accuracy Task", TASK, acc)
+    print ("Precision Task", TASK, preci)
+    print ("Recall Task", TASK, recall)
     for p in predicted:
         PREDICTIONSFILE.write("{}\n".format(p))
     PREDICTIONSFILE.close()
