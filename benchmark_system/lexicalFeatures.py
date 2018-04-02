@@ -17,6 +17,12 @@ from sklearn import metrics
 import numpy as np
 import logging
 import re
+import copy
+import emoji
+from emoji.unicode_codes import UNICODE_EMOJI
+import unicodedata
+from nltk import sent_tokenize, word_tokenize, pos_tag, ne_chunk
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -81,7 +87,7 @@ def punctuation(corpus):
     punclist =[]
     pat2 = '[(\.\.\.)]+'
     
-    pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
+    pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'   #remove url
     corp1 = []
     for str in corpus:
         str1 = re.sub(pattern, '', str, flags=re.MULTILINE)
@@ -103,33 +109,106 @@ def punctuation(corpus):
     return punc,ellips,punclist
 
 def capitalisation(corpus):
-    capitn = []
-    capit = []
-    capitt =[]
+    capitn = [] #number of words of all capitalized letter
+    capit = []  #True: contain words of letter all capitalized
+    capitl = [] #number of words with capitalized letter
+    capitt =[]  #list of three features
     for a in corpus:
         count = 0 
+        count_l = 0 
         b = a.split()
-        for c in b:
+        for c in b:     # c: word
             if c.isupper():
                 count = count + 1;
+            if any(d.isupper() for d in c):
+                count_l = count_l + 1;
         capit.append(False if count == 0 else True)      
         capitn.append(count);
+        capitl.append(count_l);
         t =[]
         t.append(False if count == 0 else True)    
         t.append(count)
+        t.append(count_l)
         capitt.append(t)
-        
     #with open('capitalisation.txt', 'w') as data_in:
         #for i in range(0,len(corpus)):
             #data_in.write("%f\t%f\n" %(capitn[i],capit[i]))
     
-    return capitn,capit,capitt
+    return capitn,capit,capitl,capitt
+
+def sentenceLength(corpus):
+    length = []
+    for a in corpus:
+        b = a.split()
+        t=[]
+        t.append(len(b))
+        length.append(t)
+    return length
+
+def extract_entities(corpus):
+    entities = []
+    entitiesCount = []
+    for a in corpus:
+        e_n =[]
+        e_c =[]
+        parse_tree = ne_chunk(pos_tag(a.split()), binary=True)
+        count = 0;
+        for t in parse_tree.subtrees():
+            if t.label() == 'NE':
+                e_n.append(t)
+                count = count + 1;
+        e_c.append(count);
+        entitiesCount.append(e_c);
+        entities.append(e_n);
+    return entities,entitiesCount
+
+def emojiList(corpus):
+    corpusNoEmo =[] # to store emoji name appended at the end of text
+    emolist = []
+    emocount =[]
+    for a in corpus:
+        b = a.split()
+        count = 0
+        t = [] # store emoji string
+        ct = [] # store count
+        for char in b:
+            s = ""
+            if char in emoji.UNICODE_EMOJI:
+                count = count + 1;
+                #convert emoji into name and append at the end of text
+                a = a + unicodedata.name(char) + " " 
+                s+=str(unicodedata.name(char))
+        t.append(s)
+        ct.append(count)
+        emolist.append(t)
+        emocount.append(ct)
+     
+    # some data processing 
+    emoji_pattern = re.compile(u'([\U00002600-\U000027BF])|([\U0001f300-\U0001f64F])|([\U0001f680-\U0001f6FF])')
+    for a in corpus:
+        #remove emojis from text corpus
+        a  = re.sub(emoji_pattern, '', a)
+        #remove any url to URL
+        a = re.sub('((www\.[^\s]+)|(https?://[^\s]+))','URL',a)
+        #Convert any @Username to "AT_USER"
+        a = re.sub('@[^\s]+','AT_USER',a)
+        #Remove additional white spaces
+        a = re.sub('[\s]+', ' ', a)
+        a = re.sub('[\n]+', ' ', a)
+        #Remove not alphanumeric symbols white spaces
+        a = re.sub(r'[^\w]', ' ', a)
+        #Replace #word with word
+        a = re.sub(r'#([^\s]+)', r'\1', a)
+        corpusNoEmo.append(a)         
+
+    return emocount,emolist,corpusNoEmo
 
 if __name__ == "__main__":
     # Experiment settings
 
     # Dataset: SemEval2018-T4-train-taskA.txt or SemEval2018-T4-train-taskB.txt
-    DATASET_FP = "./SemEval2018-T3-train-taskA.txt"
+    DATASET_FP = "/Users/xuecho/Documents/GitHub/irony-detection/datasets/train/SemEval2018-T3-train-taskA_emoji.txt"
+    #DATASET_FP = "/Users/xuecho/Documents/GitHub/irony-detection/datasets/train/SemEval2018-T3-train-taskA.txt"
     TASK = "A" # Define, A or B
     FNAME = './predictions-task' + TASK + '.txt'
     PREDICTIONSFILE = open(FNAME, "w")
@@ -143,8 +222,11 @@ if __name__ == "__main__":
     
     X = featurize(corpus)
     punc,ellips,punclist = punctuation(corpus)
-    capitn,capit,capitt = capitalisation(corpus)
+    capitn,capit,capitl,capitt = capitalisation(corpus)
+    length = sentenceLength(corpus)
+    clist,elist,corpusNoEmo = emojiList(corpus)
     m = X                              #0.632568426873
+    m = np.hstack((X,clist))
     #m = np.hstack((X,capitt))         #0.632389331867
     #m = np.hstack((m,punclist))       #0.634266886326
     #m = np.hstack((capitt,punclist))  #0.570984225728
