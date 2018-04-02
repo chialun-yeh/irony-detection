@@ -24,6 +24,7 @@ from nltk.stem import SnowballStemmer
 from nltk.corpus import stopwords
 from nltk.corpus import sentiwordnet as swn
 from nltk import pos_tag
+from nltk.corpus import wordnet
 import re
 from collections import Counter
 
@@ -252,6 +253,26 @@ def capitalisation(corpus):
     
     return capitn,capit,capitt
 
+def synonym (corpus):
+    tknzr = TweetTokenizer(preserve_case=False, strip_handles=True, reduce_len=True)
+    synonyms = []
+    for line in corpus:
+        cnt = 0;
+        tokens = tknzr.tokenize(line)
+        token = [word for word in tokens if word not in stopwords.words('english')]
+        for word in token:
+            wordsyn = [] 
+            for syn in wordnet.synsets(word):
+                for l in syn.lemmas():
+                    wordsyn.append(l.name())
+            cnt += len(set(wordsyn))
+        if(len(token)==0):
+            synonyms.append([0])
+        else:
+            synonyms.append([cnt/len(token)]) 
+    return synonyms
+
+
 if __name__ == "__main__":
     # Experiment settings
 
@@ -277,8 +298,10 @@ if __name__ == "__main__":
     capitn,capit,X5 = capitalisation(corpus)
     X6 = laughing(corpus)
     X7 = quotes(corpus)
-    
-    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7))
+    X8 = synonym(corpus)
+
+
+    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8))
     
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     #print (class_counts)
