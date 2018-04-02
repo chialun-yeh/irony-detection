@@ -2,10 +2,8 @@
 
 '''
 example.py
-
 Benchmark system for the SemEval-2018 Task 3 on Irony detection in English tweets.
 The system makes use of token unigrams as features and outputs cross-validated F1-score.
-
 Date: 1/09/2017
 Copyright (c) Gilles Jacobs & Cynthia Van Hee, LT3. All rights reserved.
 '''
@@ -42,14 +40,14 @@ def parse_dataset(fp):
     '''
     y = []
     corpus = []
-    with open(fp, 'rt') as data_in:
+    with open(fp, 'rt', encoding='utf-8') as data_in:
         for line in data_in:
             if not line.lower().startswith("tweet index"): # discard first line if it contains metadata
                 line = line.rstrip() # remove trailing whitespace
                 label = int(line.split("\t")[1])
                 tweet = line.split("\t")[2]
                 pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
-                tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE)#remove url
+                tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE) #remove url
                 y.append(label)
                 corpus.append(tweet)
 
@@ -63,7 +61,7 @@ class StemmedTfidfVectorizer(TfidfVectorizer):
         return lambda doc: (english_stemmer.stem(w) for w in analyzer(doc))
 
 
-def featurize(corpus):
+def tfidf_vectors(corpus):
     '''
     Tokenizes and creates TF-IDF BoW vectors.
     :param corpus: A list of strings each string representing document.
@@ -97,7 +95,7 @@ def char_flooding(corpus):
     # print(vectorizer.get_feature_names()) # to manually check if the tokens are reasonable
     return X
 
-def senti_featurize(corpus):
+def senti_features(corpus):
     tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
     lemma = WordNetLemmatizer()
     X  = [];
@@ -146,29 +144,10 @@ def senti_featurize(corpus):
         X.append([float(pos_sum), float(neg_sum), float(imbal), float(senti_avg), float(positive_gap), float(negative_gap)])
     return X
 
-def pos_feat(corpus, stop_words=True, strip_url=True):
-    '''
-    Tokenizes and creates TF-IDF BoW vectors.
-    :param corpus: A list of strings each string representing document.
-    :return: X: A sparse csr matrix of TFIDF-weigted ngram counts.
-    '''
-    #[re.sub(r'.+', ' ', c) for c in corpus]
-    #print(corpus[1])
+def pos_features(corpus):
     tknzr = TweetTokenizer(preserve_case=False, strip_handles=True, reduce_len=True)
     tokens = [tknzr.tokenize(c) for c in corpus]
-    lemma = WordNetLemmatizer()
-    
-
-    if stop_words:
-        filterd = []
-        for i in range(len(tokens)):
-            filterd.append([])   
-            token = [word for word in tokens[i] if word not in stopwords.words('english')]
-            for word in token:
-                #if word not in stopWords and word != '.' and word != ',' and word != '...':
-                if word != '.' and word != ',' and word != '...':
-                    filterd[i].append(word)
-            filterd[i] = pos_tag(filterd[i])
+    tagged_tokens = [pos_tag(sentence) for sentence in tokens]
 
     tags = ['CC','CD','DT','EX','FW','IN','JJ','JJR','JJS','MD','NN','NNS','NNP','NNPS','VB','VBD','VBG','VBN','VBP','VBZ','RB','RBR','RBS','RP','WP','WDT','WRB','PDT','PRP','PRP$', 'UH','SYM','TO']
     freq = []
@@ -176,10 +155,10 @@ def pos_feat(corpus, stop_words=True, strip_url=True):
     counts = dict()
     for t in tags:
         counts[t] = 0
-    for i in range(len(filterd)):
+    for i in range(len(tagged_tokens)):
         freq.append([])
         freq3Level.append([])
-        for w in filterd[i]:  
+        for w in tagged_tokens[i]:  
             if w[1] in counts:
                 counts[w[1]] += 1        
         for key, value in counts.items():
@@ -191,24 +170,22 @@ def pos_feat(corpus, stop_words=True, strip_url=True):
             else:
                 freq3Level[i].append(2)
             counts[key] = 0
-    #percent = np.divide(freq, float(np.sum(np.asarray(freq), axis=1).T))
     X = np.concatenate((freq,freq3Level), axis=1)
-    #X = np.concatenate((X,percent), axis=1)
     return X
 
 def laughing(corpus):
-    pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
-    corp1 = []
+    #pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
+    #corp1 = []
 
-    for str in corpus:
-        str1 = re.sub(pattern, '', str, flags=re.MULTILINE)
-        corp1.append(str1)
+    #for str in corpus:
+    #    str1 = re.sub(pattern, '', str, flags=re.MULTILINE)
+    #    corp1.append(str1)
 
 
     pat = '([aA]*[hH]+[Aa]+[Hh][HhAa]*|[Oo]?[Ll]+[Oo]+[Ll]+[OolL]*|[Rr][oO]+[Ff]+[lL]+|[Ll]+[Mm]+[Aa]+[oO]+).'
     laughing = []
 
-    for a in corp1:
+    for a in corpus:
         b= re.findall(pat,a)
         laughing.append([len(b)]*10)
     
@@ -231,13 +208,13 @@ def punctuation(corpus):
     punclist =[]
     pat2 = '[(\.\.)]+'
     
-    pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
-    corp1 = []
-    for str in corpus:
-        str1 = re.sub(pattern, '', str, flags=re.MULTILINE)
-        corp1.append(str1)
+    #pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
+    #corp1 = []
+    #for str in corpus:
+    #    str1 = re.sub(pattern, '', str, flags=re.MULTILINE)
+    #    corp1.append(str1)
     
-    for a in corp1:
+    for a in corpus:
         punc.append(a.count('!')+a.count('?'))
         ellips.append(len(re.findall(pat2,a)))
         t =[]
@@ -278,10 +255,8 @@ def capitalisation(corpus):
 if __name__ == "__main__":
     # Experiment settings
 
-    # Dataset: SemEval2018-T4-train-taskA.txt or SemEval2018-T4-train-taskB.txt
-    DATASET_FP = "./SemEval2018-T3-train-taskA.txt"
-    TASK = "A" # Define, A or B
-    FNAME = './predictions-task' + TASK + '.txt'
+    trn_dataset = "../datasets/train/SemEval2018-T3-train-taskA.txt"
+    FNAME = './predictions-task.txt'
     PREDICTIONSFILE = open(FNAME, "w")
 
     K_FOLDS = 10 # 10-fold crossvalidation
@@ -290,42 +265,39 @@ if __name__ == "__main__":
     #CLF = GaussianNB()
     #CLF = LogisticRegression()
 
-    # Loading dataset and featurised simple Tfidf-BoW model
-    corpus, y = parse_dataset(DATASET_FP)
-    X = featurize(corpus)
-    X1 = senti_featurize(corpus)
+    # Load dataset
+    corpus, y = parse_dataset(trn_dataset)
+    
+
+    X = tfidf_vectors(corpus)
+    X1 = senti_features(corpus)
     X2 = char_flooding(corpus)
-    X3 = pos_feat(corpus)
+    X3 = pos_features(corpus)
     punc,ellips,X4 = punctuation(corpus)
     capitn,capit,X5 = capitalisation(corpus)
     X6 = laughing(corpus)
     X7 = quotes(corpus)
     
     Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7))
-    #Z = X5
-
+    
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
-    print (class_counts)
+    #print (class_counts)
     
     # Returns an array of the same size as 'y' where each entry is a prediction obtained by cross validated
     predicted = cross_val_predict(CLF, Z, y, cv=K_FOLDS)
     #predicted = libsvm.cross_validation(Z, np.asarray(y,'float64'), 5, kernel = 'rbf')
     
-    # Modify F1-score calculation depending on the task
-    if TASK.lower() == 'a':
-        score = metrics.f1_score(y, predicted, pos_label=1)
-        acc = metrics.accuracy_score(y, predicted)
-        preci = metrics.precision_score(y, predicted)
-        recall = metrics.recall_score(y, predicted)
-    elif TASK.lower() == 'b':
-        score = metrics.f1_score(y, predicted, average="macro")
-    print ("F1-score Task", TASK, score)
-    print ("Accuracy Task", TASK, acc)
-    print ("Precision Task", TASK, preci)
-    print ("Recall Task", TASK, recall)
+
+    score = metrics.f1_score(y, predicted, pos_label=1)
+    acc = metrics.accuracy_score(y, predicted)
+    preci = metrics.precision_score(y, predicted)
+    recall = metrics.recall_score(y, predicted)
+
+    print ("F1-score:", score)
+    print ("Accuracy:", acc)
+    print ("Precision:", preci)
+    print ("Recall:", recall)
+
     for p in predicted:
         PREDICTIONSFILE.write("{}\n".format(p))
     PREDICTIONSFILE.close()
-    
-    
-    
