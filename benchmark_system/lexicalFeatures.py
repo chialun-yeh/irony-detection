@@ -22,7 +22,9 @@ import emoji
 from emoji.unicode_codes import UNICODE_EMOJI
 import unicodedata
 from nltk import sent_tokenize, word_tokenize, pos_tag, ne_chunk
-
+from nltk.tokenize.casual import EMOTICON_RE
+from EmoticonDetector import *
+from EmojiDetector import *
 
 logging.basicConfig(level=logging.INFO)
 
@@ -166,24 +168,63 @@ def emojiList(corpus):
     corpusNoEmo =[] # to store emoji name appended at the end of text
     emolist = []
     emocount =[]
+    emoTorF =[]
     for a in corpus:
         b = a.split()
         count = 0
         t = [] # store emoji string
         ct = [] # store count
+        TorF =[] # possive or negative
+        all_emoji = []
+        
         for char in b:
             s = ""
             if char in emoji.UNICODE_EMOJI:
+                all_emoji.append(char)
                 count = count + 1;
                 #convert emoji into name and append at the end of text
-                a = a + unicodedata.name(char) + " " 
-                s+=str(unicodedata.name(char))
+                #a = a + unicodedata.name(char) + " " 
+                s+= str(unicodedata.name(char)) + "," 
+            
+        if(len(all_emoji) != 0):
+            ed = EmojiDetector()
+            all_emoji.sort();
+            tf = (-1, 1)[ed.is_positive(all_emoji[0])]
+            TorF.append(tf)
+        else:
+            TorF.append(0)
+                
         t.append(s)
         ct.append(count)
         emolist.append(t)
         emocount.append(ct)
-     
-    # some data processing 
+        emoTorF.append(TorF)
+ 
+    return emocount,emolist,emoTorF
+
+def emoticonList(corpus):
+    emolist = []
+    emocount =[]
+    emoTorF =[]
+    for a in corpus:
+        ct = [] # store count
+        TorF =[] # possive or negative
+        all_emoticons = EMOTICON_RE.findall(a)
+        ct.append(len(all_emoticons))
+        if(len(all_emoticons) != 0):
+            ed = EmoticonDetector()
+            all_emoticons.sort();
+            tf = (-1, 1)[ed.is_positive(all_emoticons[0])]
+            TorF.append(tf)
+        else:
+            TorF.append(0)
+        emolist.append(all_emoticons)
+        emocount.append(ct)
+        emoTorF.append(TorF)   
+    return emocount,emoTorF, emolist
+
+def preprocessing(corpus):
+    corpusNoEmo =[]
     emoji_pattern = re.compile(u'([\U00002600-\U000027BF])|([\U0001f300-\U0001f64F])|([\U0001f680-\U0001f6FF])')
     for a in corpus:
         #remove emojis from text corpus
@@ -201,7 +242,7 @@ def emojiList(corpus):
         a = re.sub(r'#([^\s]+)', r'\1', a)
         corpusNoEmo.append(a)         
 
-    return emocount,emolist,corpusNoEmo
+    return corpusNoEmo
 
 if __name__ == "__main__":
     # Experiment settings
@@ -221,16 +262,16 @@ if __name__ == "__main__":
     corpus, y = parse_dataset(DATASET_FP)
     
     X = featurize(corpus)
+    
     punc,ellips,punclist = punctuation(corpus)
     capitn,capit,capitl,capitt = capitalisation(corpus)
     length = sentenceLength(corpus)
-    clist,elist,corpusNoEmo = emojiList(corpus)
+    entities,entitiesCount = extract_entities(corpus)
+    emojcount,emojlist,emojTorF = emojiList(corpus)
+    emocount,emoTorF,emolist = emoticonList(corpus)
     m = X                              #0.632568426873
-    m = np.hstack((X,clist))
-    #m = np.hstack((X,capitt))         #0.632389331867
-    #m = np.hstack((m,punclist))       #0.634266886326
-    #m = np.hstack((capitt,punclist))  #0.570984225728
-    #combine all three : 0.634816035146
+    m = np.hstack((emocount,emojTorF,emocount,emoTorF,entitiesCount,length,punclist,capitt))
+    #,entitiesCount,emojcount,emojTorF,emocount,emoTorF
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     print (class_counts)
     
