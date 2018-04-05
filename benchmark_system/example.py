@@ -27,6 +27,13 @@ from nltk import pos_tag
 from nltk.corpus import wordnet
 import re
 from collections import Counter
+import emoji
+from emoji.unicode_codes import UNICODE_EMOJI
+import unicodedata
+from nltk import sent_tokenize, word_tokenize, pos_tag, ne_chunk
+from nltk.tokenize.casual import EMOTICON_RE
+from EmoticonDetector import *
+from EmojiDetector import *
 
 
 logging.basicConfig(level=logging.INFO)
@@ -231,27 +238,139 @@ def punctuation(corpus):
     return punc,ellips,punclist
 
 def capitalisation(corpus):
-    capitn = []
-    capit = []
-    capitt =[]
+    capitn = [] #number of words of all capitalized letter
+    capit = []  #True: contain words of letter all capitalized
+    capitl = [] #number of words with capitalized letter
+    capitt =[]  #list of three features
     for a in corpus:
         count = 0 
+        count_l = 0 
         b = a.split()
-        for c in b:
+        for c in b:     # c: word
             if c.isupper():
                 count = count + 1;
-        capit.append(1 if count == 0 else 0)      
+            if any(d.isupper() for d in c):
+                count_l = count_l + 1;
+        capit.append(False if count == 0 else True)      
         capitn.append(count);
+        capitl.append(count_l);
         t =[]
-        t.append(1 if count == 0 else 0)    
-        t.append(count*10)
+        t.append(False if count == 0 else True)    
+        t.append(count)
+        t.append(count_l)
         capitt.append(t)
-        
     #with open('capitalisation.txt', 'w') as data_in:
         #for i in range(0,len(corpus)):
             #data_in.write("%f\t%f\n" %(capitn[i],capit[i]))
     
-    return capitn,capit,capitt
+    return capitn,capit,capitl,capitt
+
+def sentenceLength(corpus):
+    length = []
+    for a in corpus:
+        b = a.split()
+        t=[]
+        t.append(len(b))
+        length.append(t)
+    return length
+
+def extract_entities(corpus):
+    entities = []
+    entitiesCount = []
+    for a in corpus:
+        e_n =[]
+        e_c =[]
+        parse_tree = ne_chunk(pos_tag(a.split()), binary=True)
+        count = 0;
+        for t in parse_tree.subtrees():
+            if t.label() == 'NE':
+                e_n.append(t)
+                count = count + 1;
+        e_c.append(count);
+        entitiesCount.append(e_c);
+        entities.append(e_n);
+    return entities,entitiesCount
+
+def emojiList(corpus):
+    corpusNoEmo =[] # to store emoji name appended at the end of text
+    emolist = []
+    emocount =[]
+    emoTorF =[]
+    for a in corpus:
+        b = a.split()
+        count = 0
+        t = [] # store emoji string
+        ct = [] # store count
+        TorF =[] # possive or negative
+        all_emoji = []
+        
+        for char in b:
+            s = ""
+            if char in emoji.UNICODE_EMOJI:
+                all_emoji.append(char)
+                count = count + 1;
+                #convert emoji into name and append at the end of text
+                #a = a + unicodedata.name(char) + " " 
+                s+= str(unicodedata.name(char)) + "," 
+            
+        if(len(all_emoji) != 0):
+            ed = EmojiDetector()
+            all_emoji.sort();
+            tf = (-1, 1)[ed.is_positive(all_emoji[0])]
+            TorF.append(tf)
+        else:
+            TorF.append(0)
+                
+        t.append(s)
+        ct.append(count)
+        emolist.append(t)
+        emocount.append(ct)
+        emoTorF.append(TorF)
+ 
+    return emocount,emolist,emoTorF
+
+def emoticonList(corpus):
+    emolist = []
+    emocount =[]
+    emoTorF =[]
+    for a in corpus:
+        ct = [] # store count
+        TorF =[] # possive or negative
+        all_emoticons = EMOTICON_RE.findall(a)
+        ct.append(len(all_emoticons))
+        if(len(all_emoticons) != 0):
+            ed = EmoticonDetector()
+            all_emoticons.sort();
+            tf = (-1, 1)[ed.is_positive(all_emoticons[0])]
+            TorF.append(tf)
+        else:
+            TorF.append(0)
+        emolist.append(all_emoticons)
+        emocount.append(ct)
+        emoTorF.append(TorF)   
+    return emocount,emoTorF, emolist
+
+def preprocessing(corpus):
+    corpusNoEmo =[]
+    emoji_pattern = re.compile(u'([\U00002600-\U000027BF])|([\U0001f300-\U0001f64F])|([\U0001f680-\U0001f6FF])')
+    for a in corpus:
+        #remove emojis from text corpus
+        a  = re.sub(emoji_pattern, '', a)
+        #remove any url to URL
+        a = re.sub('((www\.[^\s]+)|(https?://[^\s]+))','URL',a)
+        #Convert any @Username to "AT_USER"
+        a = re.sub('@[^\s]+','AT_USER',a)
+        #Remove additional white spaces
+        a = re.sub('[\s]+', ' ', a)
+        a = re.sub('[\n]+', ' ', a)
+        #Remove not alphanumeric symbols white spaces
+        a = re.sub(r'[^\w]', ' ', a)
+        #Replace #word with word
+        a = re.sub(r'#([^\s]+)', r'\1', a)
+        corpusNoEmo.append(a)         
+
+    return corpusNoEmo
+
 
 def synonym (corpus):
     tknzr = TweetTokenizer(preserve_case=False, strip_handles=True, reduce_len=True)
@@ -276,7 +395,7 @@ def synonym (corpus):
 if __name__ == "__main__":
     # Experiment settings
 
-    trn_dataset = "../datasets/train/SemEval2018-T3-train-taskA.txt"
+    trn_dataset = "../datasets/train/SemEval2018-T3-train-taskA_emoji.txt"
     FNAME = './predictions-task.txt'
     PREDICTIONSFILE = open(FNAME, "w")
 
@@ -295,14 +414,18 @@ if __name__ == "__main__":
     X2 = char_flooding(corpus)
     X3 = pos_features(corpus)
     punc,ellips,X4 = punctuation(corpus)
-    capitn,capit,X5 = capitalisation(corpus)
+    capitn,capit,capitl,X5 = capitalisation(corpus)
     X6 = laughing(corpus)
     X7 = quotes(corpus)
     X8 = synonym(corpus)
+    X9 = sentenceLength(corpus)
+    entities,X10 = extract_entities(corpus)
+    X11,emojlist,X12 = emojiList(corpus)
+    X13,X14,emolist = emoticonList(corpus)
+                           #0.632568426873
 
-
-    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8))
-    
+    Z = np.hstack((X,X12))
+    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13,X14))
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     #print (class_counts)
     
