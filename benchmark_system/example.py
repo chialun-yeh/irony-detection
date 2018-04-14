@@ -18,6 +18,7 @@ from nltk.corpus import sentiwordnet as swn
 from nltk import pos_tag
 from nltk.corpus import wordnet
 import re
+import nltk
 from collections import Counter
 import emoji
 from emoji.unicode_codes import UNICODE_EMOJI
@@ -26,6 +27,10 @@ from nltk import sent_tokenize, word_tokenize, pos_tag, ne_chunk
 from nltk.tokenize.casual import EMOTICON_RE
 from EmoticonDetector import *
 from EmojiDetector import *
+from sklearn.svm import SVC
+from textblob import TextBlob
+import string
+import gensim
 logging.basicConfig(level=logging.INFO)
 
 def parse_dataset(fp):
@@ -89,10 +94,38 @@ def tfidf_vectors(corpus):
     :return: X: A sparse csr matrix of TFIDF-weigted ngram counts.
     '''
     tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True).tokenize
-    #vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer, stop_words="english")
-    vectorizer = StemmedTfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer, stop_words="english", ngram_range=(1,2))
+    vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer, stop_words="english")
+    #vectorizer = StemmedTfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer, stop_words="english", ngram_range=(1,2))
     X = vectorizer.fit_transform(corpus)
     X = X.toarray()
+    return X
+
+def loadGloveModel(gloveFile):
+    f = open(gloveFile,'r', encoding='utf-8')
+    model = {}
+    for line in f:
+        splitLine = line.split()
+        word = splitLine[0]
+        embedding = np.array([float(val) for val in splitLine[1:]])
+        model[word] = embedding
+    print ("Done.",len(model)," words loaded!")
+    return model
+
+def word2vectors (corpus):
+    #model = gensim.models.KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz', binary=True)
+    #model = loadGloveModel('glove.twitter.27B.200d.txt')
+    model = gensim.models.KeyedVectors.load_word2vec_format('word2vec_twitter_model.bin', binary=True, unicode_errors='ignore')
+    #corpus = preprocessing(corpus)
+    tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
+    X  = []
+    #dim = model.vector_size
+    dim = len(model['eat'])
+    for line in corpus:
+        token = tokenizer.tokenize(line)
+        token = [word for word in token if word not in stopwords.words('english')]
+        #token = [porter.stem(i.lower()) for i in token] 
+        #token = [lemma.lemmatize(word) for word in token]
+        X.append(np.mean([model[w] for w in token if w in model] or [np.zeros(dim)], axis=0))
     return X
 
 def char_flooding(corpus):
@@ -105,14 +138,14 @@ def char_flooding(corpus):
         flood = 0
         for word in token:
             for i in range(1,len(word)):
-                if word[i-1]==word[i]:
+                if (word[i-1]==word[i]):
                     count+=1
-                    if count >= 3:
+                    if count == 3:
                         flood+=1
                 else :
                     count=1
                 
-        X.append([flood]*10)
+        X.append([flood*10])
     # print(vectorizer.get_feature_names()) # to manually check if the tokens are reasonable
     return X
 
@@ -120,15 +153,15 @@ def punctuation(corpus):
     punc = []
     ellips = []
     punclist =[]
-    pat2 = '[(\.\.)]+'
+    pat2 = '[(\.\.\.)]+'
     
     for a in corpus:
         punc.append(a.count('!')+a.count('?'))
         ellips.append(len(re.findall(pat2,a)))
         t =[]
-        t.append(a.count('!')*10)
-        t.append(a.count('?')*10)
-        t.append(len(re.findall(pat2,a))*10)
+        t.append(a.count('!'))
+        t.append(a.count('?'))
+        t.append(len(re.findall(pat2,a)))
         punclist.append(t)
     return punc,ellips,punclist
 
@@ -148,7 +181,7 @@ def capitalisation(corpus):
             if any(d.isupper() for d in c):
                 count_l = count_l + 1;
         capit.append(False if count == 0 else True)      
-        capitn.append(count);
+        capitn.append(count*10);
         capitl.append(count_l);
         t =[]
         t.append(False if count == 0 else True)    
@@ -242,7 +275,7 @@ def laughing(corpus):
 
     for a in corpus:
         b= re.findall(pat,a)
-        laughing.append([len(b)]*10)
+        laughing.append([len(b)*10])
     
     return laughing
 
@@ -253,7 +286,7 @@ def quotes(corpus):
 
     for a in corpus:
         b= re.findall(pat,a)
-        quotes.append([len(b)]*10)
+        quotes.append([len(b)*10])
     
     return quotes
 
@@ -267,7 +300,8 @@ def pos_features(corpus):
     feat2=[] #feat2: whether it occurs 0, 1 or >2 times
     feat3=[] #feat3: the frequency of tags as number
     feat4=[] #feat4: the frequency of tags as percentage 
-    feat5=[] #feat6: whether there is a clash between verb tense
+    feat5=[] #feat5: whether there is a clash between verb tense
+    feat6=[] #feat6: Presence of interjection
     counts = dict()
     feat=[]
     for t in tags:
@@ -303,7 +337,9 @@ def pos_features(corpus):
             feat5.append([1])
         else:
             feat5.append([0])
-    feat = np.concatenate([feat1,feat2,feat3,feat4,feat5],axis=1)
+            
+        feat6.append([counts['UH']*10])
+    feat = np.concatenate([feat1, feat2, feat3, feat4,feat5,feat6],axis=1)
     return feat
 
 def extract_entities(corpus):
@@ -337,13 +373,17 @@ def extract_entities(corpus):
 def senti_features(corpus):
     tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
     lemma = WordNetLemmatizer()
+    porter = nltk.PorterStemmer()
+    corpus = preprocessing(corpus)
     X  = [];
     for line in corpus:
         token = tokenizer.tokenize(line)
         token = [word for word in token if word not in stopwords.words('english')]
+        #token = [porter.stem(i.lower()) for i in token] 
         token = [lemma.lemmatize(word) for word in token]
         poseachtweet=[]
         negeachtweet=[]
+        neutral = 0
         for lem in token:
             a,b=0,0
             syn = list(swn.senti_synsets(lem))
@@ -358,27 +398,37 @@ def senti_features(corpus):
     
             poseachtweet.append(a)
             negeachtweet.append(b)
+            if a == b:
+                neutral = neutral + 1
         if(len(token)!=0):
             max_pos = max(poseachtweet)
             max_neg = max(negeachtweet)
-            pos_sum = sum(poseachtweet)
-            neg_sum = sum(negeachtweet)
+            sum_pos = sum(poseachtweet)
+            sum_neg = sum(negeachtweet)
             imbal = max(poseachtweet) - min(negeachtweet)
-            senti_avg = (pos_sum-neg_sum)/len(token)
-            positive_gap = max_pos - senti_avg
-            negative_gap = max_neg - senti_avg
+            polarity = TextBlob(str(line)).sentiment.polarity
+            subjectivity = TextBlob(str(line)).sentiment.subjectivity
+            avg_pos = np.count_nonzero(poseachtweet)/len(token)
+            avg_neg = np.count_nonzero(negeachtweet)/len(token)
+            avg_neutral = neutral/len(token)
     
         else:
             max_pos = 0
             max_neg =0
-            pos_sum = 0
-            neg_sum =0
-            senti_avg =0
+            sum_pos = 0
+            sum_neg = 0
             imbal = 0
-            positive_gap = 0
-            negative_gap = 0
+            polarity = 0
+            subjectivity = 0
+            avg_pos = 0
+            avg_neg = 0
+            avg_neutral = 0
+        
+        contrast = 0
+        if (max_pos != 0) and (max_neg != 0):
+            contrast = 1
             
-        X.append([float(pos_sum), float(neg_sum), float(imbal), float(senti_avg), float(positive_gap), float(negative_gap)])
+        X.append([int(contrast), float(avg_pos), float(avg_neg), float(imbal), float(polarity), float(subjectivity)])
     return X
 
 
@@ -392,14 +442,15 @@ def preprocessing(corpus):
         #remove any url to URL
         a = re.sub('((www\.[^\s]+)|(https?://[^\s]+))','URL',a)
         #Convert any @Username to "AT_USER"
-        a = re.sub('@[^\s]+','AT_USER',a)
+        a = re.sub(r'@([^\s]+)',r'\1',a)
         #Remove additional white spaces
         a = re.sub('[\s]+', ' ', a)
         a = re.sub('[\n]+', ' ', a)
         #Remove not alphanumeric symbols white spaces
         a = re.sub(r'[^\w]', ' ', a)
         #Replace #word with word
-        a = re.sub(r'#([^\s]+)', r'\1', a)
+        #a = re.sub(r'#([^\s]+)', r'\1', a)
+        a.replace("#"," ")
         corpusNoEmo.append(a)         
 
     return corpusNoEmo
@@ -426,7 +477,11 @@ def synonym (corpus):
 
 
 def featurize(corpus):
-    X = tfidf_vectors(corpus)
+    #X = tfidf_vectors(corpus)
+    X10,emojlist,X11 = emojiList(corpus)
+    X12,X13,emolist = emoticonList(corpus)
+    X = word2vectors(corpus)
+    corpus = preprocessing(corpus)
     X1 = senti_features(corpus)
     X2 = char_flooding(corpus)
     X3 = pos_features(corpus) #0.6514 
@@ -435,12 +490,13 @@ def featurize(corpus):
     X6 = laughing(corpus)
     X7 = quotes(corpus)
     X8 = synonym(corpus)
-    sentLen, wordLen = sentenceLength(corpus)
-    entities,X10 = extract_entities(corpus)
-    X11,emojlist,X12 = emojiList(corpus)
-    X13,X14,emolist = emoticonList(corpus)
+    entities,X9 = extract_entities(corpus)
 
-    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,sentLen,wordLen,X10,X11,X12,X13,X14))
+    X14, X15 = sentenceLength(corpus)
+
+    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13,X14,X15))
+    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X10,X11,X12,X13))
+    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7))
 
     return Z
 
@@ -457,7 +513,7 @@ if __name__ == "__main__":
     #CLF = DecisionTreeClassifier(random_state=0)
     #CLF = GaussianNB()
     #CLF = LogisticRegression()
-
+    CLF = SVC(C=20) 
     # Load dataset
     corpus, y = parse_dataset(trn_dataset) #3802 in total
     Xtrn = featurize(corpus)
