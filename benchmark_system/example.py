@@ -160,7 +160,7 @@ def punctuation(corpus):
     return punc,ellips,punclist
 
 def capitalisation(corpus):
-    tokenizer = TweetTokenizer(preserve_case=False, reduce_len=False, strip_handles=True)
+    tokenizer = TweetTokenizer(preserve_case=True, reduce_len=False, strip_handles=True)
     capitn = [] #number of words of all capitalized letter
     capit = []  #True: contain words of letter all capitalized
     capitl = [] #number of words with capitalized letter
@@ -583,7 +583,7 @@ def featurize(corpus):
     #X = tfidf_vectors(corpus)
     X10,emojlist,X11 = emojiList(corpus)
     X12,X13,emolist = emoticonList(corpus)
-    X = word2vectors(corpus)
+    #X = word2vectors(corpus)
     corpus = preprocessing(corpus)
     X1 = senti_features(corpus)
     X2 = char_flooding(corpus)
@@ -602,6 +602,7 @@ def featurize(corpus):
     #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X11,X13))
     Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X10,X11,X12,X13))
     #Z = np.hstack((X,X6,X9,X10,X11,X12,X13))
+  
 
     return Z
 
