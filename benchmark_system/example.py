@@ -31,6 +31,8 @@ from sklearn.svm import SVC
 from textblob import TextBlob
 import string
 import gensim
+from afinn import Afinn
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 logging.basicConfig(level=logging.INFO)
 
 def parse_dataset(fp):
@@ -64,7 +66,7 @@ def parse_testset(fp):
             if not line.lower().startswith("tweet index"): # discard first line if it contains metadata
                 line = line.rstrip() # remove trailing whitespace
                 tweet = line.split("\t")[1]
-                pattern = '(http.+(\s)?)|((@\w*\d*(\s)?))'
+                pattern = '(http.+(\s)?)'
                 tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE) #remove url
                 corpus.append(tweet)
     return corpus
@@ -100,16 +102,6 @@ def tfidf_vectors(corpus):
     X = X.toarray()
     return X
 
-def loadGloveModel(gloveFile):
-    f = open(gloveFile,'r', encoding='utf-8')
-    model = {}
-    for line in f:
-        splitLine = line.split()
-        word = splitLine[0]
-        embedding = np.array([float(val) for val in splitLine[1:]])
-        model[word] = embedding
-    print ("Done.",len(model)," words loaded!")
-    return model
 
 def word2vectors (corpus):
     #model = gensim.models.KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin.gz', binary=True)
@@ -144,8 +136,10 @@ def char_flooding(corpus):
                         flood+=1
                 else :
                     count=1
-                
-        X.append([flood*10])
+        if (flood > 0):
+            X.append([flood/len(token)])
+        else:
+            X.append([0])
     # print(vectorizer.get_feature_names()) # to manually check if the tokens are reasonable
     return X
 
@@ -159,9 +153,9 @@ def punctuation(corpus):
         punc.append(a.count('!')+a.count('?'))
         ellips.append(len(re.findall(pat2,a)))
         t =[]
-        t.append(a.count('!'))
-        t.append(a.count('?'))
-        t.append(len(re.findall(pat2,a)))
+        t.append(a.count('!')>0)
+        t.append(a.count('?')>0)
+        t.append(len(re.findall(pat2,a))>0)
         punclist.append(t)
     return punc,ellips,punclist
 
@@ -181,7 +175,7 @@ def capitalisation(corpus):
             if any(d.isupper() for d in c):
                 count_l = count_l + 1;
         capit.append(False if count == 0 else True)      
-        capitn.append(count*10);
+        capitn.append(count);
         capitl.append(count_l);
         t =[]
         t.append(False if count == 0 else True)    
@@ -275,7 +269,10 @@ def laughing(corpus):
 
     for a in corpus:
         b= re.findall(pat,a)
-        laughing.append([len(b)*10])
+        if len(b) > 0:
+            laughing.append([len(b)/len(a.split())])
+        else:
+            laughing.append([0])
     
     return laughing
 
@@ -286,7 +283,10 @@ def quotes(corpus):
 
     for a in corpus:
         b= re.findall(pat,a)
-        quotes.append([len(b)*10])
+        if len(b) > 0:
+            quotes.append([len(b)/len(a.split())])
+        else:
+            quotes.append([0])
     
     return quotes
 
@@ -301,7 +301,6 @@ def pos_features(corpus):
     feat3=[] #feat3: the frequency of tags as number
     feat4=[] #feat4: the frequency of tags as percentage 
     feat5=[] #feat5: whether there is a clash between verb tense
-    feat6=[] #feat6: Presence of interjection
     counts = dict()
     feat=[]
     for t in tags:
@@ -338,8 +337,7 @@ def pos_features(corpus):
         else:
             feat5.append([0])
             
-        feat6.append([counts['UH']*10])
-    feat = np.concatenate([feat1, feat2, feat3, feat4,feat5,feat6],axis=1)
+    feat = np.concatenate([feat2],axis=1)
     return feat
 
 def extract_entities(corpus):
@@ -373,9 +371,18 @@ def extract_entities(corpus):
 def senti_features(corpus):
     tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
     lemma = WordNetLemmatizer()
-    porter = nltk.PorterStemmer()
-    corpus = preprocessing(corpus)
-    X  = [];
+    NEGATE = \
+    ["aint", "arent", "cannot", "cant", "couldnt", "darent", "didnt", "doesnt",
+     "ain't", "aren't", "can't", "couldn't", "daren't", "didn't", "doesn't",
+     "dont", "hadnt", "hasnt", "havent", "isnt", "mightnt", "mustnt", "neither",
+     "don't", "hadn't", "hasn't", "haven't", "isn't", "mightn't", "mustn't",
+     "neednt", "needn't", "never", "none", "nope", "nor", "not", "nothing", "nowhere",
+     "oughtnt", "shant", "shouldnt", "uhuh", "wasnt", "werent",
+     "oughtn't", "shan't", "shouldn't", "uh-uh", "wasn't", "weren't",
+     "without", "wont", "wouldnt", "won't", "wouldn't", "rarely", "seldom", "despite"]
+    X  = []
+    afinn = Afinn(emoticons=True)
+    analyzer = SentimentIntensityAnalyzer()
     for line in corpus:
         token = tokenizer.tokenize(line)
         token = [word for word in token if word not in stopwords.words('english')]
@@ -383,52 +390,97 @@ def senti_features(corpus):
         token = [lemma.lemmatize(word) for word in token]
         poseachtweet=[]
         negeachtweet=[]
+        poseachtweet1=[]
+        negeachtweet1=[]
         neutral = 0
+        prev_neg = 0
         for lem in token:
             a,b=0,0
             syn = list(swn.senti_synsets(lem))
-    
             for sy in syn:
                 a+=sy.pos_score()
                 b+=sy.neg_score()
-    
             if(len(syn)!=0):
                 a = a/len(syn)
                 b = b/len(syn)
-    
+            if prev_neg==1:
+                a, b = b, a
             poseachtweet.append(a)
-            negeachtweet.append(b)
-            if a == b:
-                neutral = neutral + 1
+            negeachtweet.append(b*-1)
+                    
+            sc = afinn.score(lem)
+            if prev_neg==1:
+                sc = sc*-1
+                prev_neg = 0
+            if sc > 0:
+                poseachtweet1.append(sc)
+                negeachtweet1.append(0)
+            elif sc < 0:
+                negeachtweet1.append(sc)
+                poseachtweet1.append(0)
+            else :
+                negeachtweet1.append(0)
+                poseachtweet1.append(0)
+                        
+            if lem in NEGATE:
+                prev_neg = 1
+            
+        max_pos = 0
+        max_neg =0
+        imbal = 0
+        avg_pos = 0
+        avg_neg = 0
+        pol = 0
+        contrast = 0 
+        max_pos1 = 0
+        max_neg1 =0
+        imbal1 = 0
+        avg_pos1 = 0
+        avg_neg1 = 0
+        pol1 = 0
+        contrast1 = 0
+        tweetscore1 = 0
+        avg_pos2 = 0
+        avg_neg2 = 0
+        pol2 = 0
+        contrast2 = 0
+        polarity = 0
+        subjectivity = 0
+        
         if(len(token)!=0):
             max_pos = max(poseachtweet)
-            max_neg = max(negeachtweet)
-            sum_pos = sum(poseachtweet)
-            sum_neg = sum(negeachtweet)
-            imbal = max(poseachtweet) - min(negeachtweet)
-            polarity = TextBlob(str(line)).sentiment.polarity
-            subjectivity = TextBlob(str(line)).sentiment.subjectivity
+            max_neg = min(negeachtweet)
+            imbal = max_pos + max_neg
             avg_pos = np.count_nonzero(poseachtweet)/len(token)
             avg_neg = np.count_nonzero(negeachtweet)/len(token)
-            avg_neutral = neutral/len(token)
-    
-        else:
-            max_pos = 0
-            max_neg =0
-            sum_pos = 0
-            sum_neg = 0
-            imbal = 0
-            polarity = 0
-            subjectivity = 0
-            avg_pos = 0
-            avg_neg = 0
-            avg_neutral = 0
-        
-        contrast = 0
-        if (max_pos != 0) and (max_neg != 0):
-            contrast = 1
+            pol = sum(poseachtweet) + sum(negeachtweet)
+            if (max_pos != 0) and (max_neg != 0):
+                contrast = 1
             
-        X.append([int(contrast), float(avg_pos), float(avg_neg), float(imbal), float(polarity), float(subjectivity)])
+            max_pos1 = max(poseachtweet1)
+            max_neg1 = min(negeachtweet1)
+            imbal1 = max_pos1 + max_neg1
+            avg_pos1 = np.count_nonzero(poseachtweet1)/len(token)
+            avg_neg1= np.count_nonzero(negeachtweet1)/len(token)
+            pol1 = sum(poseachtweet1) + sum(negeachtweet1)
+            if (max_pos1 != 0) and (max_neg1 != 0):
+                contrast1 = 1
+            tweetscore1 = afinn.score(line)/len(token)
+            
+            vs = analyzer.polarity_scores(line)
+            avg_pos2 = vs['pos']
+            avg_neg2 = vs['neg']
+            pol2 = vs['compound']
+            if (avg_pos2 != 0) and (avg_neg2 != 0):
+                contrast2 = 1
+            
+            polarity = TextBlob(str(line)).sentiment.polarity
+            subjectivity = TextBlob(str(line)).sentiment.subjectivity
+                
+        X.append([int(contrast), float(avg_pos), float(avg_neg), float(imbal), float(pol), 
+                  int(contrast1), float(tweetscore1),
+                  float(avg_pos2), float(avg_neg2),
+                  float(polarity), float(subjectivity)])
     return X
 
 
@@ -436,9 +488,54 @@ def senti_features(corpus):
 def preprocessing(corpus):
     corpusNoEmo =[]
     emoji_pattern = re.compile(u'([\U00002600-\U000027BF])|([\U0001f300-\U0001f64F])|([\U0001f680-\U0001f6FF])')
+    emo_repl = {
+		# positive emoticons
+		"&lt3": " good ",
+		":d": " good ",
+		":ddd": " good ",
+		"=)": " happy ",
+		"8)": " happy ",
+		":-)": " happy ",
+		":)": " happy ",
+		";)": " happy ",
+		"(-:": " happy ",
+		"(:": " happy ",
+		"=]": " happy ",
+		"[=": " happy ",
+
+		# negative emoticons
+		":&gt;": " sad ",
+		":')": " sad ",
+		":-(": " bad ",
+		":(": " bad ",
+		":S": " bad ",
+		":-S": " bad ",
+	}
+
+    emo_repl_order = [k for (k_len,k) in reversed(sorted([(len(k),k) for k in emo_repl.keys()]))]
+
+    re_repl = {
+		r"\br\b": "are",
+		r"\bu\b": "you",
+		r"\don't\b": "do not",
+		r"\bdoesn't\b": "does not",
+		r"\bdidn't\b": "did not",
+		r"\bhasn't\b": "has not",
+		r"\bhaven't\b": "have not",
+		r"\bhadn't\b": "had not",
+		r"\bwon't\b": "will not",
+		r"\bwouldn't\b": "would not",
+		r"\bcan't\b": "can not",
+		r"\bcannot\b": "can not",
+		r"\bain't\b": "are not",
+		r"\bwhat's\b": "what is",
+		r"\bthere's\b": "there is",
+	}
+
+
     for a in corpus:
         #remove emojis from text corpus
-        a  = re.sub(emoji_pattern, '', a)
+        #a  = re.sub(emoji_pattern, '', a)
         #remove any url to URL
         a = re.sub('((www\.[^\s]+)|(https?://[^\s]+))','URL',a)
         #Convert any @Username to "AT_USER"
@@ -446,11 +543,17 @@ def preprocessing(corpus):
         #Remove additional white spaces
         a = re.sub('[\s]+', ' ', a)
         a = re.sub('[\n]+', ' ', a)
+        # Convert eemoticonss to text
+        for k in emo_repl_order:
+            a = a.replace(k, emo_repl[k])
+        # Convert Twitter abbreviations to text
+        for r, repl in re_repl.items():
+            a = re.sub(r,repl,a)
         #Remove not alphanumeric symbols white spaces
-        a = re.sub(r'[^\w]', ' ', a)
+        #a = re.sub(r'[^\w]', ' ', a)
         #Replace #word with word
         #a = re.sub(r'#([^\s]+)', r'\1', a)
-        a.replace("#"," ")
+        a = a.replace("#"," ")
         corpusNoEmo.append(a)         
 
     return corpusNoEmo
@@ -495,8 +598,10 @@ def featurize(corpus):
     X14, X15 = sentenceLength(corpus)
 
     #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13,X14,X15))
+    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13))
+    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X11,X13))
     Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X10,X11,X12,X13))
-    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7))
+    #Z = np.hstack((X,X6,X9,X10,X11,X12,X13))
 
     return Z
 
@@ -513,7 +618,7 @@ if __name__ == "__main__":
     #CLF = DecisionTreeClassifier(random_state=0)
     #CLF = GaussianNB()
     #CLF = LogisticRegression()
-    CLF = SVC(C=20) 
+    CLF = SVC(C=25) 
     # Load dataset
     corpus, y = parse_dataset(trn_dataset) #3802 in total
     Xtrn = featurize(corpus)
