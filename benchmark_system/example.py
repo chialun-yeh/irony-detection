@@ -33,9 +33,8 @@ import string
 import gensim
 from afinn import Afinn
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-logging.basicConfig(level=logging.INFO)
 import csv
-logging.basicConfig(level=logging.INFO)
+
 
 def parse_dataset(fp):
     '''
@@ -99,18 +98,18 @@ def readCsvFile(filename):
 
     return corpus, y
 
-def testing(Xtrn, y, testTweet):
+def testing(Xtrn, y, testTweet, feat='best'):
     if testTweet:
         testName = 'Tweet'
         testFile = "../datasets/test/tweet/SemEval2018-T3_gold_test_taskA_emoji.txt" 
         textTweet, label = parse_testset(testFile)
-        Xtst = featurize(textTweet)
+        Xtst = featurize(textTweet, feat)
 
     else:
         testName='Reddit'
         testFile = '../datasets/test/reddit/irony-labeled.csv'
         textReddit, label = readCsvFile(testFile)
-        Xtst = featurize(textReddit)
+        Xtst = featurize(textReddit, feat)
 
     clsf = SVC(C=25) 
     model = clsf.fit(Xtrn, y)
@@ -382,7 +381,7 @@ def pos_features(corpus):
             feat5.append([1])
         else:
             feat5.append([0])
-            
+      
     feat = np.concatenate([feat2],axis=1)
     return feat
 
@@ -625,30 +624,31 @@ def synonym (corpus):
     return synonyms
 
 
-def featurize(corpus):
+def featurize(corpus, feat='best'):
     #X = tfidf_vectors(corpus)
     X10,emojlist,X11 = emojiList(corpus)
     X12,X13,emolist = emoticonList(corpus)
-    #X = word2vectors(corpus)
+    X = word2vectors(corpus)
     corpus = preprocessing(corpus)
     X1 = senti_features(corpus)
     X2 = char_flooding(corpus)
-    X3 = pos_features(corpus) #0.6514 
+    X3 = pos_features(corpus) 
     punc,ellips,X4 = punctuation(corpus)
     capitn,capit,capitl,X5 = capitalisation(corpus)
     X6 = laughing(corpus)
     X7 = quotes(corpus)
-    X8 = synonym(corpus)
+    #X8 = synonym(corpus)
     entities,X9 = extract_entities(corpus)
-
     X14, X15 = sentenceLength(corpus)
 
-    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13,X14,X15))
-    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X8,X9,X10,X11,X12,X13))
-    #Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X11,X13))
-    Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X10,X11,X12,X13))
-    #Z = np.hstack((X,X6,X9,X10,X11,X12,X13))
-  
+    if feat=='lexical':
+        Z = np.hstack((X,X2,X4,X5,X6,X7,X14,X15))
+    elif feat =='syntactic':
+        Z = np.hstack((X, X3, X9))
+    elif feat == 'senti':
+        Z = np.hstack((X,X1,X10,X11,X12,X13))
+    else:
+        Z = np.hstack((X,X1,X2,X3,X4,X5,X6,X7,X9,X10,X11,X12,X13))
 
     return Z
 
@@ -670,8 +670,6 @@ if __name__ == "__main__":
     corpus, y = parse_dataset(trn_dataset) #3802 in total
     Xtrn = featurize(corpus)
     print(np.asarray(Xtrn).shape)
-    
-
     class_counts = np.asarray(np.unique(y, return_counts=True)).T.tolist()
     print (class_counts)
     
@@ -679,19 +677,6 @@ if __name__ == "__main__":
     predicted = cross_val_predict(CLF, Xtrn, y, cv=K_FOLDS)
     #predicted = libsvm.cross_validation(Z, np.asarray(y,'float64'), 5, kernel = 'rbf')
     
-
-    #Testing
-    #tst_dataset = "../datasets/test/tweet/SemEval2018-T3_input_test_taskA.txt"
-    #test_corpus = parse_testset(tst_dataset)
-    #tst = featurize(test_corpus)
-    # Initialize classifier
-    # clsf = LinearSVC()
-    # Train classifier
-    #model = clsf.fit(Xtrn, y)
-    #predict
-    #pred = clsf.predict(Xtst)
-
-
     score = metrics.f1_score(y, predicted, pos_label=1)
     acc = metrics.accuracy_score(y, predicted)
     preci = metrics.precision_score(y, predicted)
