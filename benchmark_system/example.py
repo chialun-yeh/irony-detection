@@ -34,6 +34,8 @@ import gensim
 from afinn import Afinn
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 logging.basicConfig(level=logging.INFO)
+import csv
+logging.basicConfig(level=logging.INFO)
 
 def parse_dataset(fp):
     '''
@@ -51,8 +53,7 @@ def parse_dataset(fp):
                 line = line.rstrip() # remove trailing whitespace
                 label = int(line.split("\t")[1])
                 tweet = line.split("\t")[2]
-                pattern = 'http.+(\s)?'
-                tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE) #remove url
+                tweet = re.sub(r'http\S+', '', tweet, flags=re.MULTILINE) #remove url
                 tweet = re.sub('@[^\s]+','user', tweet) #replace @tag with user
                 if(len(tweet) != 0):
                     y.append(label)
@@ -60,27 +61,72 @@ def parse_dataset(fp):
     return corpus, y
 
 def parse_testset(fp):
+    
+    y = []
     corpus = []
     with open(fp, 'rt', encoding='utf-8') as data_in:
         for line in data_in:
             if not line.lower().startswith("tweet index"): # discard first line if it contains metadata
                 line = line.rstrip() # remove trailing whitespace
-                tweet = line.split("\t")[1]
-                pattern = '(http.+(\s)?)'
-                tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE) #remove url
-                corpus.append(tweet)
-    return corpus
-
-def get_label(fp):
-    label = []
-    with open (fp, 'rt', encoding='utf-8') as data_in:
-        for line in data_in:
-            if not line.lower().startswith("tweet index"): # discard first line if it contains metadata
-                line = line.rstrip() # remove trailing whitespace
+                tweet = line.split("\t")[2]
                 lab = int(line.split("\t")[1])
-                label.append(lab)
-    return label
+                pattern = 'http.+(\s)?'
+                tweet = re.sub(pattern, '', tweet, flags=re.MULTILINE) #remove url
+                tweet = re.sub('@[^\s]+','user', tweet) #replace @tag with user
+                if(len(tweet) != 0):
+                    y.append(lab)
+                    corpus.append(tweet)
+    return corpus, y
 
+def readCsvFile(filename):
+
+    corpus =[]
+    y=[]
+
+    with open(filename, encoding='utf-8') as csvDataFile:
+        csvReader = csv.reader(csvDataFile)
+        for row in csvReader:
+            if not row[0].lower().startswith("comment"):
+                text = row[0]
+                lab = int(row[1])
+                pattern = 'http.+(\s)?'
+                text = re.sub(pattern, '', text, flags=re.MULTILINE) #remove url
+                if(len(text) != 0):
+                    if lab<0:
+                        lab=0
+                    y.append(lab)
+                    corpus.append(text)
+
+    return corpus, y
+
+def testing(Xtrn, y, testTweet):
+    if testTweet:
+        testName = 'Tweet'
+        testFile = "../datasets/test/tweet/SemEval2018-T3_gold_test_taskA_emoji.txt" 
+        textTweet, label = parse_testset(testFile)
+        Xtst = featurize(textTweet)
+
+    else:
+        testName='Reddit'
+        testFile = '../datasets/test/reddit/irony-labeled.csv'
+        textReddit, label = readCsvFile(testFile)
+        Xtst = featurize(textReddit)
+
+    clsf = SVC(C=25) 
+    model = clsf.fit(Xtrn, y)
+    pred = clsf.predict(Xtst)
+
+    score = metrics.f1_score(label, pred, pos_label=1)
+    acc = metrics.accuracy_score(label, pred)
+    preci = metrics.precision_score(label, pred)
+    recall = metrics.recall_score(label, pred)
+
+    print('Testing metrics on ', testName)
+    print ("F1-score:", score)
+    print ("Accuracy:", acc)
+    print ("Precision:", preci)
+    print ("Recall:", recall)
+	
 english_stemmer = SnowballStemmer('english')
 
 class StemmedTfidfVectorizer(TfidfVectorizer):
@@ -655,6 +701,8 @@ if __name__ == "__main__":
     print ("Accuracy:", acc)
     print ("Precision:", preci)
     print ("Recall:", recall)
+	
+    testing(Xtrn, y, True)
 
     for p in predicted:
         PREDICTIONSFILE.write("{}\n".format(p))
